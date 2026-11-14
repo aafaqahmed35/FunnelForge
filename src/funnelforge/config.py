@@ -73,10 +73,13 @@ class DatabaseConfig:
 class AppConfig:
     """FunnelForge application configuration."""
 
-    db: DatabaseConfig
-    data_dir: Path
-    processed_dir: Path
-    rejected_dir: Path
+    db: DatabaseConfig = DatabaseConfig()
+    data_dir: Path = PROJECT_ROOT / "data" / "raw"
+    processed_dir: Path = PROJECT_ROOT / "data" / "processed"
+    rejected_dir: Path = PROJECT_ROOT / "data" / "rejected"
+    reports_dir: Path = PROJECT_ROOT / "reports" / "generated"
+    logs_dir: Path = PROJECT_ROOT / "logs"
+    log_level: str = "INFO"
     random_seed: int = 42
 
     @classmethod
@@ -92,6 +95,10 @@ class AppConfig:
         data_path = resolve_dir("DATA_DIR", "data/raw")
         proc_path = resolve_dir("PROCESSED_DATA_DIR", "data/processed")
         rej_path = resolve_dir("REJECTED_DATA_DIR", "data/rejected")
+        rep_path = resolve_dir("REPORTS_DIR", "reports/generated")
+        log_path = resolve_dir("LOGS_DIR", "logs")
+
+        log_level = os.getenv("LOG_LEVEL", "INFO").upper()
 
         seed_raw = os.getenv("RANDOM_SEED", "42")
         try:
@@ -104,5 +111,8 @@ class AppConfig:
             data_dir=data_path,
             processed_dir=proc_path,
             rejected_dir=rej_path,
+            reports_dir=rep_path,
+            logs_dir=log_path,
+            log_level=log_level,
             random_seed=seed,
         )

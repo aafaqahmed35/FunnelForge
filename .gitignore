@@ -43,6 +43,14 @@ data/processed/*.csv
 data/rejected/*.csv
 !data/rejected/.gitkeep
 
+# Generated reports & exports
+reports/generated/*
+!reports/generated/.gitkeep
+
+# Application logs
+logs/*.log
+!logs/.gitkeep
+
 # IDE & OS
 .DS_Store
 .vscode/

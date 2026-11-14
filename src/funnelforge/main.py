@@ -1,9 +1,11 @@
 """Main CLI entry point for FunnelForge pipeline execution.
 
 Supports running:
+- Complete end-to-end automated pipeline (--pipeline [--dirty])
 - P1: Data Foundation & Ingestion (generate -> schema init -> raw ingestion)
 - P2: Data Cleaning & Quality Assurance (validate -> clean -> separate -> persist processed & issues -> quality report)
-- P3: Marketing Analytics & Business Intelligence (campaigns, channels, funnel, customers, revenue)
+- P3: Marketing Analytics & Business Intelligence (--analytics [all|campaigns|channels|funnel|customers|revenue])
+- P4: Automated Report Generation & Exports (--report)
 - Individual modular operations independently.
 """
 
@@ -12,6 +14,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from typing import Optional
 
 from funnelforge.analytics import MarketingAnalytics
 from funnelforge.cleaning import run_cleaning_pipeline
@@ -19,6 +22,11 @@ from funnelforge.config import AppConfig
 from funnelforge.database import initialize_p2_schema, initialize_schema
 from funnelforge.generator import generate_all_datasets
 from funnelforge.ingestion import ingest_data
+from funnelforge.logging import get_logger, setup_logging
+from funnelforge.pipeline import execute_full_pipeline
+from funnelforge.reporting import ReportGenerator
+
+logger = get_logger("main")
 
 
 def run_pipeline(
@@ -141,6 +149,18 @@ def main(argv: list[str] | None = None) -> int:
     )
     # Mode selection
     parser.add_argument(
+        "--pipeline",
+        action="store_true",
+        help="Run complete end-to-end automated pipeline (Extract -> Ingest -> Clean -> Analyze -> Report).",
+    )
+    parser.add_argument(
+        "--report",
+        "--reports",
+        action="store_true",
+        dest="report",
+        help="Generate and export analytical reports (CSV, JSON, TXT).",
+    )
+    parser.add_argument(
         "--analytics",
         nargs="?",
         const="all",
@@ -218,15 +238,50 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Path to rejected CSV files directory (default: data/rejected).",
     )
+    parser.add_argument(
+        "--reports-dir",
+        type=Path,
+        default=None,
+        help="Path to reports export directory (default: reports/generated).",
+    )
+    parser.add_argument(
+        "--log-level",
+        type=str,
+        default=None,
+        help="Logging level: DEBUG, INFO, WARNING, ERROR (default: INFO).",
+    )
 
     args = parser.parse_args(argv)
     config = AppConfig.load()
+    setup_logging(log_level=args.log_level or config.log_level)
 
     try:
+        # P4 Unified Pipeline
+        if args.pipeline:
+            status = execute_full_pipeline(
+                dirty=args.dirty,
+                seed=args.seed,
+                config=config,
+            )
+            return 0 if status.status == "SUCCESS" else 1
+
+        # P4 Report Export
+        if args.report:
+            reporter = ReportGenerator(config=config.db)
+            out_dir = args.reports_dir or config.reports_dir
+            paths = reporter.export_all(output_dir=out_dir)
+            print(f"\nSuccessfully generated {len(paths)} reports in {out_dir}:")
+            for key, path in paths.items():
+                print(f"  • {key:<26}: {path}")
+            print()
+            return 0
+
+        # P3 Analytics
         if args.analytics:
             run_analytics_reporting(topic=args.analytics, config=config)
             return 0
 
+        # P2 Quality Pipeline
         if args.p2:
             run_p2_quality_pipeline(
                 raw_data_dir=args.data_dir,
@@ -273,6 +328,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     except Exception as err:
+        logger.error("Pipeline failed: %s", err)
         print(f"\n[ERROR] Pipeline failed: {err}", file=sys.stderr)
         return 1
 

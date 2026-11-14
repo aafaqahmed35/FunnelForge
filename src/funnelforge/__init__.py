@@ -1,6 +1,6 @@
 """FunnelForge: Lightweight Marketing Data Analytics Pipeline."""
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 from funnelforge.analytics import MarketingAnalytics
 from funnelforge.analytics_repository import AnalyticsRepository
@@ -15,7 +15,14 @@ from funnelforge.config import AppConfig, DatabaseConfig
 from funnelforge.database import get_connection, initialize_p2_schema, initialize_schema
 from funnelforge.generator import generate_all_datasets
 from funnelforge.ingestion import IngestionResult, ingest_data
+from funnelforge.logging import get_logger, setup_logging
+from funnelforge.pipeline import (
+    PipelineOrchestrator,
+    PipelineStatus,
+    execute_full_pipeline,
+)
 from funnelforge.quality import DatasetMetrics, QualityReport
+from funnelforge.reporting import ReportGenerator
 
 __all__ = [
     "AppConfig",
@@ -35,4 +42,10 @@ __all__ = [
     "MarketingAnalytics",
     "AnalyticsRepository",
     "AnalyticsService",
+    "ReportGenerator",
+    "PipelineOrchestrator",
+    "PipelineStatus",
+    "execute_full_pipeline",
+    "setup_logging",
+    "get_logger",
 ]
