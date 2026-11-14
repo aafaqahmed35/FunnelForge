@@ -131,3 +131,4 @@ def test_persist_processed_data_failure_rollback():
 
         mock_conn.rollback.assert_called_once()
         mock_conn.commit.assert_not_called()
+

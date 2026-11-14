@@ -1,7 +1,10 @@
 """FunnelForge: Lightweight Marketing Data Analytics Pipeline."""
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
+from funnelforge.analytics import MarketingAnalytics
+from funnelforge.analytics_repository import AnalyticsRepository
+from funnelforge.analytics_service import AnalyticsService
 from funnelforge.cleaning import (
     CleaningResult,
     RejectedRecord,
@@ -29,4 +32,7 @@ __all__ = [
     "persist_processed_data",
     "DatasetMetrics",
     "QualityReport",
+    "MarketingAnalytics",
+    "AnalyticsRepository",
+    "AnalyticsService",
 ]

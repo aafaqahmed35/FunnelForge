@@ -64,3 +64,4 @@ CREATE TABLE IF NOT EXISTS data_quality_issues (
 CREATE INDEX IF NOT EXISTS idx_dqi_dataset ON data_quality_issues(source_dataset);
 CREATE INDEX IF NOT EXISTS idx_dqi_record_id ON data_quality_issues(record_id);
 CREATE INDEX IF NOT EXISTS idx_dqi_detected_at ON data_quality_issues(detected_at);
+

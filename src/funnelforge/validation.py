@@ -260,3 +260,4 @@ def validate_event(
             errors.append("Conversion event missing valid revenue")
 
     return errors
+

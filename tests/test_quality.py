@@ -67,3 +67,4 @@ def test_quality_report_to_dict_and_print(capsys):
     assert "DATA QUALITY REPORT" in captured.out
     assert "Campaigns" in captured.out
     assert "Overall acceptance rate" in captured.out
+

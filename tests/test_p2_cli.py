@@ -70,3 +70,4 @@ def test_run_p2_quality_pipeline_flow(tmp_path: Path):
             persist_db=True,
             config=mock_init.call_args[1]["config"],
         )
+

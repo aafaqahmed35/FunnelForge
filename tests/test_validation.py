@@ -238,3 +238,4 @@ def test_categorize_reason():
     assert categorize_reason("Referenced customer_id does not exist") == IssueCategory.REFERENTIAL_INTEGRITY
     assert categorize_reason("Negative revenue not allowed") == IssueCategory.BUSINESS_RULE
     assert categorize_reason("Campaign end_date precedes start_date") == IssueCategory.BUSINESS_RULE
+

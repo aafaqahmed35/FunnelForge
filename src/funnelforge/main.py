@@ -3,7 +3,8 @@
 Supports running:
 - P1: Data Foundation & Ingestion (generate -> schema init -> raw ingestion)
 - P2: Data Cleaning & Quality Assurance (validate -> clean -> separate -> persist processed & issues -> quality report)
-- Individual modular operations independently (generation with/without dirty mode, schema init, cleaning, ingestion).
+- P3: Marketing Analytics & Business Intelligence (campaigns, channels, funnel, customers, revenue)
+- Individual modular operations independently.
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from funnelforge.analytics import MarketingAnalytics
 from funnelforge.cleaning import run_cleaning_pipeline
 from funnelforge.config import AppConfig
 from funnelforge.database import initialize_p2_schema, initialize_schema
@@ -72,7 +74,6 @@ def run_p2_quality_pipeline(
     j_dir = rejected_dir or config.rejected_dir
     target_seed = seed if seed is not None else config.random_seed
 
-    # Check if raw files exist; if not or if generate_first is requested, generate them
     raw_files_exist = (
         (r_dir / "campaigns.csv").is_file()
         and (r_dir / "customers.csv").is_file()
@@ -105,6 +106,33 @@ def run_p2_quality_pipeline(
     print("\nP2 Quality pipeline completed successfully!")
 
 
+def run_analytics_reporting(
+    topic: str = "all",
+    config: Optional[AppConfig] = None,
+) -> None:
+    """Execute requested marketing analytics reporting queries."""
+    cfg = config or AppConfig.load()
+    analytics = MarketingAnalytics(config=cfg.db)
+
+    topic_lower = topic.lower()
+    if topic_lower == "campaigns":
+        analytics.report_campaign_performance()
+    elif topic_lower == "channels":
+        analytics.report_channel_performance()
+    elif topic_lower == "funnel":
+        analytics.report_conversion_funnel()
+    elif topic_lower == "customers":
+        analytics.report_customer_analysis()
+    elif topic_lower == "revenue":
+        analytics.report_revenue_analysis()
+    elif topic_lower == "all":
+        analytics.report_all()
+    else:
+        raise ValueError(
+            f"Unknown analytics topic '{topic}'. Choose from: all, campaigns, channels, funnel, customers, revenue"
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     """Parse command line arguments and execute requested pipeline tasks."""
     parser = argparse.ArgumentParser(
@@ -112,6 +140,13 @@ def main(argv: list[str] | None = None) -> int:
         description="FunnelForge: Marketing Data Analytics Pipeline",
     )
     # Mode selection
+    parser.add_argument(
+        "--analytics",
+        nargs="?",
+        const="all",
+        choices=["all", "campaigns", "channels", "funnel", "customers", "revenue"],
+        help="Run SQL marketing analytics reporting (default: all).",
+    )
     parser.add_argument(
         "--p2",
         action="store_true",
@@ -188,6 +223,10 @@ def main(argv: list[str] | None = None) -> int:
     config = AppConfig.load()
 
     try:
+        if args.analytics:
+            run_analytics_reporting(topic=args.analytics, config=config)
+            return 0
+
         if args.p2:
             run_p2_quality_pipeline(
                 raw_data_dir=args.data_dir,

@@ -129,3 +129,4 @@ class QualityReport:
             "issues_by_dataset": self.issues_by_dataset,
             "top_rejection_reasons": self.rejection_reasons_counter.most_common(10),
         }
+
