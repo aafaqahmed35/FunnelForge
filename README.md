@@ -1,17 +1,22 @@
 # FunnelForge
 
-**FunnelForge** is a lightweight, modular marketing data analytics pipeline designed to ingest, model, and analyze multi-channel digital marketing campaigns, customer acquisition funnels, and conversion events.
+**FunnelForge** is a lightweight, modular marketing data analytics pipeline designed to ingest, validate, model, and analyze multi-channel digital marketing campaigns, customer acquisition funnels, and conversion events.
 
 ---
 
 ## 1. Project Overview
 
-FunnelForge establishes a robust data foundation for marketing analytics. In **Phase 1 (P1 — Data Foundation & Ingestion)**, the system provides:
-- A relational PostgreSQL schema for raw marketing data with referential integrity and domain constraints.
-- A synthetic data generator producing realistic, clean marketing datasets across campaigns, customers, and funnel events.
-- An idempotent, transactional CSV ingestion engine built with Pandas and Psycopg 3.
-- A command-line interface supporting end-to-end execution and individual stage isolation.
-- A unit test suite verifying data integrity, schema validation, and database operations without requiring a live database.
+FunnelForge establishes a reliable data foundation for marketing analytics through a two-phase architecture:
+- **Phase 1 (P1 — Data Foundation & Ingestion):** Relational PostgreSQL raw storage, reproducible synthetic generation (11,020 records), and transactional bulk CSV ingestion.
+- **Phase 2 (P2 — Data Cleaning & Quality Assurance):** An automated data-quality validation engine that transforms raw marketing data into trustworthy analytics-ready datasets, separates accepted from rejected records, captures multi-error lineage in PostgreSQL JSONB, and compiles dynamic data quality summaries.
+
+### Central Distinctions: Raw vs. Processed vs. Rejected Records
+
+| Category | Storage Location | State & Purpose |
+| :--- | :--- | :--- |
+| **Raw Records** | `data/raw/*.csv`<br>`raw_*` PostgreSQL tables | Faithful replica of incoming source data. Ingested as-is without filtering or validation to ensure raw auditability. |
+| **Processed Records** | `data/processed/*.csv`<br>`processed_*` PostgreSQL tables | Validated, normalized, deduplicated records that have satisfied every schema constraint, business rule, and referential integrity check. |
+| **Rejected Records** | `data/rejected/*_rejected.csv`<br>`data_quality_issues` PostgreSQL table | Corrupt or invalid records quarantined with source dataset, record identifier, all failure reasons, original raw payload in JSONB, and detection timestamp. |
 
 ---
 
@@ -29,45 +34,50 @@ FunnelForge establishes a robust data foundation for marketing analytics. In **P
 ## 3. Architecture & Data Flow
 
 ```
-+-----------------------------------------------------------+
-|                     FunnelForge P1                        |
-+-----------------------------------------------------------+
++-------------------------------------------------------------------------------+
+|                                  FunnelForge                                  |
++-------------------------------------------------------------------------------+
 
-   [Synthetic Generator] (Configurable Seed)
-             |
-             v
-   +-------------------+  +-------------------+  +-------------------+
-   |   campaigns.csv   |  |   customers.csv   |  |    events.csv     |
-   |    (20 records)   |  |  (1,000 records)  |  |  (10,000 records) |
-   +-------------------+  +-------------------+  +-------------------+
-             |                      |                      |
-             +----------------------+----------------------+
-                                    |
-                                    v
-                         [Pandas CSV Ingestion]
-                     (Validation & Type Sanitization)
-                                    |
-                                    v
-                     [Transactional Table Replacement]
-                 (TRUNCATE CASCADE inside atomic transaction)
-                                    |
-                                    v
-                           [psycopg executemany]
-                                    |
-                                    v
-                    +-------------------------------+
-                    |     PostgreSQL (Raw Layer)    |
-                    |  - raw_campaigns              |
-                    |  - raw_customers              |
-                    |  - raw_events                 |
-                    +-------------------------------+
+                      [Synthetic Data Generator]
+                       (Clean or Dirty Mode: Seed)
+                                  |
+                                  v
+                      +------------------------+
+                      |       data/raw/        |
+                      |  - campaigns.csv       |
+                      |  - customers.csv       |
+                      |  - events.csv          |
+                      +------------------------+
+                                  |
+            +---------------------+---------------------+
+            | (P1: Raw Ingestion)                       | (P2: Quality Pipeline)
+            v                                           v
++------------------------+                  +------------------------+
+|   Transactional Raw    |                  |   Cleaning Engine      |
+|   Table Replacement    |                  |   - Normalization      |
++------------------------+                  |   - Validation Rules   |
+            |                               |   - Deduplication      |
+            v                               +------------------------+
++------------------------+                              |
+| PostgreSQL: Raw Layer  |              +---------------+---------------+
+|  - raw_campaigns       |              |                               |
+|  - raw_customers       |        (ACCEPTED)                       (REJECTED)
+|  - raw_events          |              v                               v
++------------------------+   +--------------------+          +--------------------+
+                             |  data/processed/   |          |   data/rejected/   |
+                             |  - campaigns.csv   |          |  - campaigns_rej   |
+                             |  - customers.csv   |          |  - customers_rej   |
+                             |  - events.csv      |          |  - events_rej      |
+                             +--------------------+          |  - issues audit    |
+                                        |                    +--------------------+
+                                        v                               |
+                             +--------------------+                     v
+                             |  PostgreSQL:       |          +--------------------+
+                             |  Processed Layer   |          |  PostgreSQL:       |
+                             |  - processed_*     |          |  data_quality_     |
+                             +--------------------+          |  issues (JSONB)    |
+                                                             +--------------------+
 ```
-
-### Ingestion Strategy: Transactional Table Replacement
-For this initial raw-data pipeline, FunnelForge uses **transactional table replacement** (`TRUNCATE TABLE raw_events, raw_customers, raw_campaigns CASCADE;` followed by bulk insertion within a single atomic database transaction).
-- **Idempotency:** Running the ingestion workflow repeatedly produces the exact same clean state with zero duplicate records.
-- **Referential Integrity:** Parent tables (`raw_campaigns`, `raw_customers`) are populated before the dependent child table (`raw_events`), ensuring all foreign key constraints are strictly satisfied.
-- **Atomicity & Fault Tolerance:** If any error occurs during reading, validation, or loading, psycopg issues a complete rollback (`conn.rollback()`), preventing partial data states or orphaned rows.
 
 ---
 
@@ -76,27 +86,41 @@ For this initial raw-data pipeline, FunnelForge uses **transactional table repla
 ```
 FunnelForge/
 ├── data/
-│   └── raw/                       # Generated raw CSV datasets (gitignored)
+│   ├── raw/                       # Raw input CSV datasets (gitignored)
+│   │   └── .gitkeep
+│   ├── processed/                 # Validated, clean CSV datasets (gitignored)
+│   │   └── .gitkeep
+│   └── rejected/                  # Quarantined CSV datasets & audit logs (gitignored)
 │       └── .gitkeep
 ├── sql/
-│   └── schema.sql                 # PostgreSQL DDL for raw tables and indexes
+│   ├── schema.sql                 # P1 DDL: raw tables & indexes
+│   └── p2_schema.sql              # P2 DDL: processed tables & data_quality_issues
 ├── src/
 │   └── funnelforge/
 │       ├── __init__.py            # Package exports
+│       ├── cleaning.py            # Data cleaning engine & record separation
 │       ├── config.py              # Environment configuration & DB settings
 │       ├── database.py            # Psycopg connection context & DDL execution
-│       ├── generator.py           # Synthetic data generation logic
-│       ├── ingestion.py           # CSV validation & bulk transactional loading
-│       └── main.py                # Unified CLI entry point
+│       ├── generator.py           # Synthetic generator (clean and dirty modes)
+│       ├── ingestion.py           # Raw CSV validation & bulk transactional loading
+│       ├── main.py                # Unified CLI entry point (P1 and P2)
+│       ├── quality.py             # Data quality metrics & reporting
+│       └── validation.py          # Explicit validation rules & categorization
 ├── tests/
 │   ├── __init__.py
+│   ├── test_cleaning.py           # Cleaning, deduplication, & file export tests
 │   ├── test_config.py             # Config & env parsing unit tests
 │   ├── test_database.py           # Database connection & error handling tests
+│   ├── test_dirty_generator.py    # Dirty data generation & reproducibility tests
 │   ├── test_generator.py          # Data generation, counts, & seed reproducibility tests
 │   ├── test_ingestion.py          # CSV validation & mocked ingestion tests
-│   └── test_main.py               # CLI argument & orchestration tests
+│   ├── test_main.py               # P1 CLI argument & orchestration tests
+│   ├── test_p2_cli.py             # P2 CLI argument & pipeline tests
+│   ├── test_p2_database.py        # P2 DDL & transactional persistence tests
+│   ├── test_quality.py            # Quality metrics & summary calculations
+│   └── test_validation.py         # Explicit validation rules & multi-error tests
 ├── .env.example                   # Sample environment configuration template
-├── .gitignore                     # Git ignore rules (env, cache, raw CSVs)
+├── .gitignore                     # Git ignore rules (env, cache, all CSV data)
 ├── requirements.txt               # Pinned project dependencies
 └── README.md                      # Project documentation
 ```
@@ -105,78 +129,57 @@ FunnelForge/
 
 ## 5. Database Schema
 
-The raw layer is defined in `sql/schema.sql` and consists of three tables:
+The database schema is organized into two layers:
 
-### `raw_campaigns`
-Stores marketing campaign definitions, budgets, and operational schedules.
-| Column | Type | Constraints | Description |
-| :--- | :--- | :--- | :--- |
-| `campaign_id` | `VARCHAR(64)` | `PRIMARY KEY` | Unique campaign identifier (e.g., `CMP-001`) |
-| `campaign_name` | `VARCHAR(255)` | `NOT NULL` | Descriptive campaign title |
-| `channel` | `VARCHAR(50)` | `NOT NULL` | Marketing channel (`Email`, `Social Media`, `Search`, `Display`, `Referral`) |
-| `budget` | `NUMERIC(12, 2)` | `NOT NULL`, `CHECK (budget >= 0)` | Allocated campaign budget in USD |
-| `start_date` | `DATE` | `NOT NULL` | Campaign launch date |
-| `end_date` | `DATE` | `NOT NULL` | Campaign conclusion date (`CHECK (end_date >= start_date)`) |
+### Raw Layer (`sql/schema.sql`)
+- `raw_campaigns`: Stores raw campaign records (`campaign_id` PK, name, channel, budget, dates).
+- `raw_customers`: Stores raw customer profiles (`customer_id` PK, name, email, acquisition source, signup date).
+- `raw_events`: Stores raw funnel events (`event_id` PK, customer/campaign FKs, event type, timestamp, revenue).
 
-### `raw_customers`
-Stores acquired customer profiles and initial attribution.
-| Column | Type | Constraints | Description |
-| :--- | :--- | :--- | :--- |
-| `customer_id` | `VARCHAR(64)` | `PRIMARY KEY` | Unique customer identifier (e.g., `CUST-0001`) |
-| `customer_name` | `VARCHAR(255)` | `NOT NULL` | Full customer name |
-| `email` | `VARCHAR(255)` | `NOT NULL` | Customer contact email |
-| `acquisition_source` | `VARCHAR(50)` | `NOT NULL` | First-touch acquisition channel |
-| `signup_date` | `DATE` | `NOT NULL` | Account registration date |
-
-### `raw_events`
-Stores granular funnel engagement events with foreign key linkage to customers and campaigns.
-| Column | Type | Constraints | Description |
-| :--- | :--- | :--- | :--- |
-| `event_id` | `VARCHAR(64)` | `PRIMARY KEY` | Unique event identifier (e.g., `EVT-00001`) |
-| `customer_id` | `VARCHAR(64)` | `NOT NULL`, `REFERENCES raw_customers(customer_id) ON DELETE CASCADE` | Associated customer |
-| `campaign_id` | `VARCHAR(64)` | `NOT NULL`, `REFERENCES raw_campaigns(campaign_id) ON DELETE CASCADE` | Associated campaign |
-| `event_type` | `VARCHAR(20)` | `NOT NULL`, `CHECK IN ('impression', 'click', 'conversion')` | Interaction stage |
-| `event_timestamp` | `TIMESTAMPTZ` | `NOT NULL` | UTC timestamp of interaction |
-| `revenue` | `NUMERIC(12, 2)` | `CHECK` | Monetary value for conversions; `NULL` for impressions & clicks |
+### Processed & Quality Assurance Layer (`sql/p2_schema.sql`)
+- `processed_campaigns`: Stores validated, clean campaigns (`campaign_id` PK, name, channel, budget $\ge 0$, start date, end date $\ge$ start date).
+- `processed_customers`: Stores validated, clean customer profiles (`customer_id` PK, name, formatted email, acquisition source, signup date).
+- `processed_events`: Stores validated, clean funnel events with foreign keys referencing `processed_customers` and `processed_campaigns`.
+- `data_quality_issues`: Audit trail table capturing quarantined records:
+  - `issue_id`: `BIGSERIAL PRIMARY KEY`
+  - `source_dataset`: `VARCHAR(50) NOT NULL` (e.g., `campaigns`, `customers`, `events`)
+  - `record_id`: `VARCHAR(64)` (primary identifier or `UNKNOWN`)
+  - `rejection_reason`: `TEXT NOT NULL` (semicolon-separated list of all captured errors)
+  - `original_record`: `JSONB NOT NULL` (complete raw payload for auditability)
+  - `detected_at`: `TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP`
 
 ---
 
-## 6. Dataset Descriptions
+## 6. Validation Rules & Rejection Handling
 
-The synthetic generator produces exactly **11,020 records** across three files in `data/raw/`:
+Every incoming record is evaluated through the validation engine (`src/funnelforge/validation.py`). If one or more rules fail, the record is flagged as **REJECTED**, and **all** failure reasons are captured:
 
-| Dataset | Target File | Record Count | Description |
-| :--- | :--- | :--- | :--- |
-| **Campaigns** | `data/raw/campaigns.csv` | **20** | 20 marketing campaigns across 5 core channels with realistic budgets ($5,000–$75,000) and date ranges. |
-| **Customers** | `data/raw/customers.csv` | **1,000** | 1,000 customer accounts with unique IDs, names, emails, and acquisition sources. |
-| **Events** | `data/raw/events.csv` | **10,000** | 10,000 funnel interactions (impressions, clicks, conversions) with realistic timestamps bounded by campaign duration, valid foreign keys, and positive revenue on conversions. |
-| **Total** | | **11,020** | |
-
-Reproducibility is guaranteed via a configurable random seed (default `42`).
+| Category | Validation Rule | Impact on Failure |
+| :--- | :--- | :--- |
+| **Missing Required Fields** | Primary keys, campaign name, customer name, email, channel, acquisition source, event type, dates must not be null/blank. | Quarantined to `rejected/` and `data_quality_issues` |
+| **Duplicate Detection** | Duplicate primary keys (`campaign_id`, `customer_id`, `event_id`). First occurrence accepted; subsequent occurrences rejected. | Preserves first instance, rejects subsequent duplicates |
+| **Format Validation** | Email format must match RFC standard regex; dates and timestamps must be valid ISO-8601 strings; numeric values must be parseable. | Quarantined with specific format violation message |
+| **Business Rules** | Campaign `end_date` $\ge$ `start_date`; budget $\ge 0$; revenue $\ge 0$; non-conversion events must have `NULL` revenue; conversion events must have valid positive revenue. | Quarantined with business logic violation reason |
+| **Referential Integrity** | Event `customer_id` and `campaign_id` must exist within the set of **accepted** parent records. | Prevents orphaned records in processed layer |
 
 ---
 
-## 7. Environment Configuration
+## 7. Synthetic Data Generator Modes
 
-1. Copy `.env.example` to create your local `.env`:
-   ```bash
-   cp .env.example .env
-   ```
+The generator (`src/funnelforge/generator.py`) produces **11,020 records** across two deterministic modes:
 
-2. Edit `.env` with your PostgreSQL connection parameters:
-   ```env
-   DB_HOST=localhost
-   DB_PORT=5432
-   DB_NAME=funnelforge
-   DB_USER=postgres
-   DB_PASSWORD=your_password
-
-   # Optional: Full connection URL
-   # DATABASE_URL=postgresql://postgres:your_password@localhost:5432/funnelforge
-
-   DATA_DIR=data/raw
-   RANDOM_SEED=42
-   ```
+- **Clean Mode (P1 default):** Produces pristine, valid records across all datasets with 0% defects.
+- **Dirty Mode (P2 `--dirty`):** Injects realistic, reproducible data quality defects:
+  - Missing customer and campaign names
+  - Invalid email formats
+  - Duplicate customer and event records
+  - Missing campaign identifiers
+  - Invalid event types (`hover`, `bounce`, `purchase`)
+  - Negative revenue values
+  - Non-conversion events carrying revenue / conversion events missing revenue
+  - Invalid timestamp formats
+  - Events referencing nonexistent customers (`CUST-9999`) and campaigns (`CMP-999`)
+  - Invalid campaign date ranges (`end_date < start_date`)
 
 ---
 
@@ -193,54 +196,93 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### Execution Options
-
-#### 1. Run Complete Pipeline (Generate + Init DB + Ingest)
+### Complete P2 Quality Workflow (Single Command)
+To run the full end-to-end P2 pipeline with dirty data generation, schema initialization, cleaning, file partitioning, database persistence, and quality reporting:
 ```bash
-python3 -m funnelforge.main
-# Or explicitly:
-python3 -m funnelforge.main --all
+python3 -m funnelforge.main --p2 --dirty
 ```
 
-#### 2. Run Individual Operations
-- **Generate synthetic CSVs only:**
-  ```bash
-  python3 -m funnelforge.main --generate --seed 42
-  ```
-- **Initialize database schema only:**
-  ```bash
-  python3 -m funnelforge.main --init-db
-  ```
-- **Ingest existing CSVs into database only:**
-  ```bash
-  python3 -m funnelforge.main --ingest
-  ```
+### Additional Execution Commands
+
+| Task | Command |
+| :--- | :--- |
+| **P1 End-to-End Pipeline** | `python3 -m funnelforge.main --all` |
+| **Generate Clean CSVs Only** | `python3 -m funnelforge.main --generate --seed 42` |
+| **Generate Dirty CSVs Only** | `python3 -m funnelforge.main --generate --dirty --seed 42` |
+| **Clean Existing Raw CSVs** | `python3 -m funnelforge.main --clean` |
+| **Clean Without DB (Files Only)** | `python3 -m funnelforge.main --clean --no-db` |
+| **Initialize P1 Raw DB Schema** | `python3 -m funnelforge.main --init-db` |
+| **Initialize P2 Processed DB Schema** | `python3 -m funnelforge.main --init-p2-db` |
 
 ---
 
-## 9. Testing Instructions
+## 9. Example Data Quality Report
 
-All unit tests use `pytest` and mock database interactions, ensuring tests execute quickly and reliably **without requiring a live PostgreSQL instance**:
+When running the P2 quality pipeline in dirty mode (`python3 -m funnelforge.main --p2 --dirty`), FunnelForge outputs:
+
+```
+======================================================================
+                     DATA QUALITY REPORT
+======================================================================
+Dataset            Examined   Accepted   Rejected    Acceptance Rate
+----------------------------------------------------------------------
+Campaigns                20         17          3              85.0%
+Customers             1,000        969         31              96.9%
+Events               10,000      8,458      1,542              84.6%
+----------------------------------------------------------------------
+Total                11,020      9,444      1,576              85.7%
+======================================================================
+Overall acceptance rate: 85.7%
+Overall rejection rate:  14.3%
+
+Issue Counts by Category:
+  • Referential Integrity     : 1,374
+  • Invalid Format            :   111
+  • Business Rule Violation   :    84
+  • Missing Required Fields   :    45
+  • Duplicate Record          :    27
+
+Issue Counts by Source Dataset:
+  • events                    : 1,542
+  • customers                 :    31
+  • campaigns                 :     3
+
+Top Rejection Reasons:
+  • [496x] Referenced campaign_id 'CMP-003' does not exist in accepted campaigns
+  • [479x] Referenced campaign_id 'CMP-013' does not exist in accepted campaigns
+  • [75x] Referenced customer_id 'CUST-9999' does not exist in accepted customers
+  • [75x] Referenced campaign_id 'CMP-999' does not exist in accepted campaigns
+  • [30x] Non-conversion event of type 'click' must not have revenue (got 49.99)
+======================================================================
+```
+
+---
+
+## 10. Testing Instructions
+
+All unit tests use `pytest` and mock database interactions. Unit tests execute in under 2 seconds without requiring a live PostgreSQL instance:
 
 ```bash
 PYTHONPATH=src pytest -v
 ```
 
-### Test Coverage Highlights:
-- **`test_generator.py`**: Verifies exact record counts (20, 1,000, 10,000), column presence, referential integrity across IDs, revenue constraints, and seed reproducibility.
-- **`test_config.py`**: Validates environment variable parsing, default fallbacks, and connection string generation.
-- **`test_database.py`**: Tests connection lifecycle, exception handling, rollback semantics, and idempotent schema execution.
-- **`test_ingestion.py`**: Tests CSV validation, missing file handling, missing column validation, `NaN` to `None` SQL sanitization, transactional table replacement, and database error rollback.
-- **`test_main.py`**: Validates command-line flags and pipeline orchestration.
+### Test Suite Summary:
+- **`test_validation.py`:** Tests each validation rule independently, multiple errors per record, format checks, and categorization.
+- **`test_cleaning.py`:** Tests normalization, customer/event deduplication, referential integrity isolation, and file persistence.
+- **`test_dirty_generator.py`:** Tests clean vs. dirty mode generation, specific defect counts, and seed reproducibility.
+- **`test_quality.py`:** Tests metric calculations, acceptance/rejection percentages, and report rendering.
+- **`test_p2_database.py`:** Tests DDL execution, transactional table replacement, rollback on error, and JSONB issue persistence.
+- **`test_p2_cli.py`:** Tests CLI flags (`--p2`, `--clean`, `--init-p2-db`, `--no-db`) and pipeline orchestration.
+- **P1 Regression Suite:** Preserves all existing tests for P1 configuration, database connectivity, and raw ingestion.
 
 ---
 
-## 10. Roadmap
+## 11. Roadmap
 
 - [x] **P1 — Data Foundation & Ingestion**
   - Project architecture, raw schema, synthetic generator (11,020 records), transactional bulk ingestion, unit test suite.
-- [ ] **P2 — Data Cleaning & Quality Assurance**
-  - Introduction of realistic dirty data, automated quality checks, anomaly detection, deduplication, and schema validation gates.
+- [x] **P2 — Data Cleaning & Quality Assurance**
+  - Dirty data generator, multi-rule validation engine, accepted/rejected partitioning, PostgreSQL processed layer & JSONB audit issues, dynamic data quality metrics.
 - [ ] **P3 — Transformation & Marketing Modeling**
   - Staging transformations, dbt/SQL modeling, attribution modeling (first-touch, last-touch, linear), and customer cohort analysis.
 - [ ] **P4 — Analytics & Reporting Engine**

@@ -35,9 +35,13 @@ ENV/
 .coverage
 htmlcov/
 
-# Data files (do not commit raw CSV data)
+# Data files (do not commit raw, processed, or rejected CSV data)
 data/raw/*.csv
 !data/raw/.gitkeep
+data/processed/*.csv
+!data/processed/.gitkeep
+data/rejected/*.csv
+!data/rejected/.gitkeep
 
 # IDE & OS
 .DS_Store

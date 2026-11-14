@@ -85,3 +85,31 @@ def initialize_schema(
                 msg = f"Failed to execute schema initialization SQL: {err}"
                 logger.error(msg)
                 raise DatabaseError(msg) from err
+
+
+def initialize_p2_schema(
+    schema_path: Optional[Path] = None,
+    config: Optional[DatabaseConfig] = None,
+) -> None:
+    """Execute the DDL in p2_schema.sql to create processed tables and data_quality_issues.
+
+    Initialization is idempotent.
+    """
+    path = schema_path or (PROJECT_ROOT / "sql" / "p2_schema.sql")
+    if not path.is_file():
+        raise FileNotFoundError(f"P2 Schema file not found at: {path}")
+
+    sql_script = path.read_text(encoding="utf-8")
+
+    with get_connection(config) as conn:
+        with conn.cursor() as cur:
+            try:
+                cur.execute(sql_script)
+                conn.commit()
+                logger.info("P2 database schema initialized successfully from %s", path)
+            except errors.Error as err:
+                conn.rollback()
+                msg = f"Failed to execute P2 schema initialization SQL: {err}"
+                logger.error(msg)
+                raise DatabaseError(msg) from err
+

@@ -75,16 +75,23 @@ class AppConfig:
 
     db: DatabaseConfig
     data_dir: Path
+    processed_dir: Path
+    rejected_dir: Path
     random_seed: int = 42
 
     @classmethod
     def load(cls) -> AppConfig:
         """Load complete application configuration from environment."""
         db_cfg = DatabaseConfig.from_env()
-        raw_data_dir = os.getenv("DATA_DIR", "data/raw")
-        data_path = Path(raw_data_dir)
-        if not data_path.is_absolute():
-            data_path = PROJECT_ROOT / data_path
+
+        def resolve_dir(env_var: str, default: str) -> Path:
+            raw_dir = os.getenv(env_var, default)
+            p = Path(raw_dir)
+            return p if p.is_absolute() else PROJECT_ROOT / p
+
+        data_path = resolve_dir("DATA_DIR", "data/raw")
+        proc_path = resolve_dir("PROCESSED_DATA_DIR", "data/processed")
+        rej_path = resolve_dir("REJECTED_DATA_DIR", "data/rejected")
 
         seed_raw = os.getenv("RANDOM_SEED", "42")
         try:
@@ -95,5 +102,7 @@ class AppConfig:
         return cls(
             db=db_cfg,
             data_dir=data_path,
+            processed_dir=proc_path,
+            rejected_dir=rej_path,
             random_seed=seed,
         )
